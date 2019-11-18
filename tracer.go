@@ -64,6 +64,10 @@ func (t *Tracer) Stop() {
 	<-t.done
 }
 
+func (t *Tracer) Flush() {
+	t.flush <- struct{}{}
+}
+
 func (t *Tracer) handleStream(s network.Stream) {
 	log.Debugf("New stream from %s", s.Conn().RemotePeer())
 
