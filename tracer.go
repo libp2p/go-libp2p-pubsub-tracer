@@ -200,15 +200,7 @@ outer:
 				continue outer
 			}
 
-			f, err := os.Open(current)
-			if err != nil {
-				log.Warningf("error opening trace log file: %s", err)
-				continue inner
-			}
-
-			finfo, err := f.Stat()
-			f.Close()
-
+			finfo, err := os.Stat(current)
 			if err != nil {
 				log.Warningf("error stating trace log file: %s", err)
 				continue inner
