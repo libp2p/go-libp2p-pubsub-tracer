@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"flag"
 	"fmt"
@@ -9,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/libp2p/go-libp2p-core/crypto"
@@ -56,7 +56,7 @@ func main() {
 	)
 
 	if pnk := os.Getenv("PNET_KEY"); pnk != "" {
-		protector, err := pnet.NewProtector(bytes.NewBufferString(pnk))
+		protector, err := pnet.NewProtector(strings.NewReader(pnk))
 		if err != nil {
 			log.Fatal(err)
 		}
