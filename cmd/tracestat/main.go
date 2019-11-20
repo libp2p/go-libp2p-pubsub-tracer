@@ -33,7 +33,9 @@ func main() {
 		stat.load(f)
 	}
 
-	stat.compute()
+	if *cdf || *jsonOut != "" {
+		stat.compute()
+	}
 
 	// this will just print some stuff to stdout
 	// TODO: produce JSON output
