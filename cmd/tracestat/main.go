@@ -2,10 +2,12 @@ package main
 
 import (
 	"compress/gzip"
+	"flag"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"sort"
 
 	pb "github.com/libp2p/go-libp2p-pubsub/pb"
 
@@ -15,8 +17,16 @@ import (
 )
 
 func main() {
-	stat := &tracestat{peers: make(map[peer.ID]*msgstat), msgs: make(map[string][]int64)}
-	for _, f := range os.Args[1:] {
+	summary := flag.Bool("summary", true, "print trace summary")
+	cdf := flag.Bool("cdf", false, "print propagation delay CDF")
+	flag.Parse()
+
+	stat := &tracestat{
+		peers:  make(map[peer.ID]*msgstat),
+		msgs:   make(map[string][]int64),
+		delays: make(map[string][]int64),
+	}
+	for _, f := range flag.Args() {
 		stat.load(f)
 	}
 
@@ -24,21 +34,28 @@ func main() {
 
 	// this will just print some stuff to stdout
 	// TODO: produce JSON output
-	stat.printSummary()
+	if *summary {
+		stat.printSummary()
+	}
+	if *cdf {
+		stat.printCDF()
+	}
 }
 
 type tracestat struct {
-	// peer peer stats
+	// per peer stats
 	peers map[peer.ID]*msgstat
 
 	// aggregate stats
 	aggregate msgstat
 
 	// message propagation trace: timestamps from published and delivered messages
-	// we can compute propagation delay distributions from this
 	msgs map[string][]int64
 
-	// this is the computed propagation delay distribution
+	// message propagation delays
+	delays map[string][]int64
+
+	// this is the computed propagation delay distribution across all messages
 	delayCDF []sample
 }
 
@@ -53,7 +70,7 @@ type msgstat struct {
 }
 
 type sample struct {
-	delay int64
+	delay int
 	count int
 }
 
@@ -119,7 +136,7 @@ func (ts *tracestat) addEvent(evt *pb.TraceEvent) {
 	case pb.TraceEvent_DELIVER_MESSAGE:
 		ps.deliver++
 		ts.aggregate.deliver++
-		mid := string(evt.GetPublishMessage().GetMessageID())
+		mid := string(evt.GetDeliverMessage().GetMessageID())
 		ts.msgs[mid] = append(ts.msgs[mid], timestamp)
 
 	case pb.TraceEvent_SEND_RPC:
@@ -133,7 +150,40 @@ func (ts *tracestat) addEvent(evt *pb.TraceEvent) {
 }
 
 func (ts *tracestat) compute() {
-	// TODO
+	// sort the message publish/delivery timestamps and transform to delays
+	for mid, timestamps := range ts.msgs {
+		sort.Slice(timestamps, func(i, j int) bool {
+			return timestamps[i] < timestamps[j]
+		})
+
+		delays := make([]int64, len(timestamps)-1)
+		t0 := timestamps[0]
+		for i, t := range timestamps[1:] {
+			delays[i] = t - t0
+		}
+		ts.delays[mid] = delays
+	}
+
+	// compute the CDF rounded to millisecond precision
+	samples := make(map[int]int)
+	for _, delays := range ts.delays {
+		for _, dt := range delays {
+			mdt := int((dt + 499999) / 1000000)
+			samples[mdt]++
+		}
+	}
+
+	xsamples := make([]sample, 0, len(samples))
+	for dt, count := range samples {
+		xsamples = append(xsamples, sample{dt, count})
+	}
+	sort.Slice(xsamples, func(i, j int) bool {
+		return xsamples[i].delay < xsamples[j].delay
+	})
+	for i := 1; i < len(xsamples); i++ {
+		xsamples[i].count += xsamples[i-1].count
+	}
+	ts.delayCDF = xsamples
 }
 
 func (ts *tracestat) printSummary() {
@@ -145,4 +195,11 @@ func (ts *tracestat) printSummary() {
 	fmt.Printf("Rejected Messages: %d\n", ts.aggregate.reject)
 	fmt.Printf("Sent RPCs: %d\n", ts.aggregate.sendRPC)
 	fmt.Printf("Dropped RPCS: %d\n", ts.aggregate.dropRPC)
+}
+
+func (ts *tracestat) printCDF() {
+	fmt.Printf("=== Propagation Delay CDF ===\n")
+	for _, sample := range ts.delayCDF {
+		fmt.Printf("%d %d\n", sample.delay, sample.count)
+	}
 }
