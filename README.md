@@ -39,3 +39,16 @@ Usage:
 ```
 trace2json <trace-file> ...
 ```
+
+### tracestat
+
+This is a trace analysis tool, that can analyze one or more trace files.
+
+Usage:
+```
+tracestat [-summary] [-cdf] [-json <file>] <trace-file> ...
+
+  -summary: Print an analysis summary to stdout; defaults to true
+  -cdf: Print a CDF of message propagation delays to stdout; defaults to false
+  -json <file>: Output the result of the analysis to a json file for further processing by other tools
+```
