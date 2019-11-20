@@ -2,6 +2,8 @@ package main
 
 import (
 	"compress/gzip"
+	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -19,6 +21,7 @@ import (
 func main() {
 	summary := flag.Bool("summary", true, "print trace summary")
 	cdf := flag.Bool("cdf", false, "print propagation delay CDF")
+	jsonOut := flag.String("json", "", "save analysis output to json file")
 	flag.Parse()
 
 	stat := &tracestat{
@@ -39,6 +42,9 @@ func main() {
 	}
 	if *cdf {
 		stat.printCDF()
+	}
+	if *jsonOut != "" {
+		stat.dumpJSON(*jsonOut)
 	}
 }
 
@@ -198,8 +204,76 @@ func (ts *tracestat) printSummary() {
 }
 
 func (ts *tracestat) printCDF() {
-	fmt.Printf("=== Propagation Delay CDF ===\n")
+	fmt.Printf("=== Propagation Delay CDF (ms) ===\n")
 	for _, sample := range ts.delayCDF {
 		fmt.Printf("%d %d\n", sample.delay, sample.count)
 	}
+}
+
+func (ts *tracestat) dumpJSON(f string) {
+	w, err := os.OpenFile(f, os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer w.Close()
+
+	enc := json.NewEncoder(w)
+
+	type MsgStat struct {
+		Publish, Deliver, Duplicate, Reject, SendRPC, DropRPC int
+	}
+
+	type Sample struct {
+		DelayMillis int
+		Count       int
+	}
+
+	type Dump struct {
+		PeerStats       map[string]MsgStat
+		AggregateStats  MsgStat
+		MessageDelays   map[string][]int
+		MessageDelayCDF []Sample
+	}
+
+	dump := &Dump{
+		PeerStats:     make(map[string]MsgStat),
+		MessageDelays: make(map[string][]int),
+	}
+
+	for p, st := range ts.peers {
+		dump.PeerStats[p.Pretty()] = MsgStat{
+			Publish:   st.publish,
+			Deliver:   st.deliver,
+			Duplicate: st.duplicate,
+			Reject:    st.reject,
+			SendRPC:   st.sendRPC,
+			DropRPC:   st.dropRPC,
+		}
+	}
+
+	dump.AggregateStats = MsgStat{
+		Publish:   ts.aggregate.publish,
+		Deliver:   ts.aggregate.deliver,
+		Duplicate: ts.aggregate.duplicate,
+		Reject:    ts.aggregate.reject,
+		SendRPC:   ts.aggregate.sendRPC,
+		DropRPC:   ts.aggregate.dropRPC,
+	}
+
+	for mid, delays := range ts.delays {
+		delayMillis := make([]int, len(delays))
+		for i, dt := range delays {
+			delayMillis[i] = int((dt + 499999) / 1000000)
+		}
+		midHex := hex.EncodeToString([]byte(mid))
+		dump.MessageDelays[midHex] = delayMillis
+	}
+
+	delayCDF := make([]Sample, len(ts.delayCDF))
+	for i, s := range ts.delayCDF {
+		delayCDF[i] = Sample{DelayMillis: s.delay, Count: s.count}
+	}
+	dump.MessageDelayCDF = delayCDF
+
+	enc.Encode(dump)
 }
