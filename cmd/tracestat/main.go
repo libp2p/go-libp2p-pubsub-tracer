@@ -202,7 +202,7 @@ func (ts *tracestat) printSummary() {
 	fmt.Printf("Duplicate Messages: %d\n", ts.aggregate.duplicate)
 	fmt.Printf("Rejected Messages: %d\n", ts.aggregate.reject)
 	fmt.Printf("Sent RPCs: %d\n", ts.aggregate.sendRPC)
-	fmt.Printf("Dropped RPCS: %d\n", ts.aggregate.dropRPC)
+	fmt.Printf("Dropped RPCs: %d\n", ts.aggregate.dropRPC)
 }
 
 func (ts *tracestat) printCDF() {
