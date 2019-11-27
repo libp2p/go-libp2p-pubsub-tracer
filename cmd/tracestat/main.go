@@ -7,18 +7,27 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"sort"
 
-	pb "github.com/libp2p/go-libp2p-pubsub/pb"
-
 	"github.com/libp2p/go-libp2p-core/peer"
+	pb "github.com/libp2p/go-libp2p-pubsub/pb"
 
 	ggio "github.com/gogo/protobuf/io"
 )
 
+// tracestat is a program that parses a pubsub tracer dump and calculates
+// statistics. By default, stats are printed to stdout, but they can be
+// optionally written to a JSON file for further processing.
 func main() {
+	var err error
+	defer func() {
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+	}()
+
 	summary := flag.Bool("summary", true, "print trace summary")
 	cdf := flag.Bool("cdf", false, "print propagation delay CDF")
 	jsonOut := flag.String("json", "", "save analysis output to json file")
@@ -29,8 +38,12 @@ func main() {
 		msgs:   make(map[string][]int64),
 		delays: make(map[string][]int64),
 	}
+
 	for _, f := range flag.Args() {
-		stat.load(f)
+		err = stat.load(f)
+		if err != nil {
+			return
+		}
 	}
 
 	if *cdf || *jsonOut != "" {
@@ -46,28 +59,31 @@ func main() {
 		stat.printCDF()
 	}
 	if *jsonOut != "" {
-		stat.dumpJSON(*jsonOut)
+		err = stat.dumpJSON(*jsonOut)
 	}
 }
 
+// tracestat is the tree that's populated as we parse the dump.
 type tracestat struct {
-	// per peer stats
+	// peers summarizes per-peer stats.
 	peers map[peer.ID]*msgstat
 
-	// aggregate stats
+	// aggregate stats.
 	aggregate msgstat
 
-	// message propagation trace: timestamps from published and delivered messages
+	// msgs contains per-message propagation traces: timestamps from published
+	// and delivered messages.
 	msgs map[string][]int64
 
-	// message propagation delays
+	// delays is the propagation delay per message, in millis.
 	delays map[string][]int64
 
-	// this is the computed propagation delay distribution across all messages
+	// delayCDF is the computed propagation delay distribution across all
+	// messages.
 	delayCDF []sample
 }
 
-// message statistics
+// msgstat holds message statistics.
 type msgstat struct {
 	publish   int
 	deliver   int
@@ -77,23 +93,22 @@ type msgstat struct {
 	dropRPC   int
 }
 
+// sample represents a CDF bucket.
 type sample struct {
 	delay int
 	count int
 }
 
-func (ts *tracestat) load(f string) {
+func (ts *tracestat) load(f string) error {
 	r, err := os.Open(f)
 	if err != nil {
-		log.Printf("error opening trace file %s: %s", f, err)
-		return
+		return fmt.Errorf("error opening trace file %s: %w", f, err)
 	}
 	defer r.Close()
 
 	gzipR, err := gzip.NewReader(r)
 	if err != nil {
-		log.Printf("error opening gzip reader for %s: %s", f, err)
-		return
+		return fmt.Errorf("error opening gzip reader for %s: %w", f, err)
 	}
 	defer gzipR.Close()
 
@@ -103,28 +118,28 @@ func (ts *tracestat) load(f string) {
 	for {
 		evt.Reset()
 
-		err = pbr.ReadMsg(&evt)
-		if err != nil {
-			if err == io.EOF {
-				return
-			}
-
-			log.Printf("error decoding trace event from %s: %s", f, err)
-			return
+		switch err = pbr.ReadMsg(&evt); err {
+		case nil:
+			ts.addEvent(&evt)
+		case io.EOF:
+			return nil
+		default:
+			return fmt.Errorf("error decoding trace event from %s: %w", f, err)
 		}
-
-		ts.addEvent(&evt)
 	}
 }
 
 func (ts *tracestat) addEvent(evt *pb.TraceEvent) {
-	peer := peer.ID(evt.GetPeerID())
+	var (
+		peer      = peer.ID(evt.GetPeerID())
+		timestamp = evt.GetTimestamp()
+	)
+
 	ps, ok := ts.peers[peer]
 	if !ok {
 		ps = &msgstat{}
 		ts.peers[peer] = ps
 	}
-	timestamp := evt.GetTimestamp()
 
 	switch evt.GetType() {
 	case pb.TraceEvent_PUBLISH_MESSAGE:
@@ -212,38 +227,43 @@ func (ts *tracestat) printCDF() {
 	}
 }
 
-func (ts *tracestat) dumpJSON(f string) {
+func (ts *tracestat) dumpJSON(f string) error {
 	w, err := os.OpenFile(f, os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer w.Close()
 
 	enc := json.NewEncoder(w)
 
-	type MsgStat struct {
+	// Counts breaks down counts per event type.
+	type Counts struct {
 		Publish, Deliver, Duplicate, Reject, SendRPC, DropRPC int
 	}
 
-	type Sample struct {
-		DelayMillis int
-		Count       int
+	// Bucket represents a bucket in a cumulative distribution function.
+	type Bucket struct {
+		Millis int
+		Count  int
 	}
 
-	type Dump struct {
-		PeerStats       map[string]MsgStat
-		AggregateStats  MsgStat
-		MessageDelays   map[string][]int
-		MessageDelayCDF []Sample
+	// Dump represents the full JSON dump tree.
+	var dump struct {
+		Events struct {
+			PerPeer map[string]Counts
+			Totals  Counts
+		}
+		Delays struct {
+			PerMessage map[string][]int
+			CDF        []Bucket
+		}
 	}
 
-	dump := &Dump{
-		PeerStats:     make(map[string]MsgStat),
-		MessageDelays: make(map[string][]int),
-	}
+	dump.Events.PerPeer = make(map[string]Counts)
+	dump.Delays.PerMessage = make(map[string][]int)
 
 	for p, st := range ts.peers {
-		dump.PeerStats[p.Pretty()] = MsgStat{
+		dump.Events.PerPeer[p.Pretty()] = Counts{
 			Publish:   st.publish,
 			Deliver:   st.deliver,
 			Duplicate: st.duplicate,
@@ -253,7 +273,7 @@ func (ts *tracestat) dumpJSON(f string) {
 		}
 	}
 
-	dump.AggregateStats = MsgStat{
+	dump.Events.Totals = Counts{
 		Publish:   ts.aggregate.publish,
 		Deliver:   ts.aggregate.deliver,
 		Duplicate: ts.aggregate.duplicate,
@@ -265,17 +285,18 @@ func (ts *tracestat) dumpJSON(f string) {
 	for mid, delays := range ts.delays {
 		delayMillis := make([]int, len(delays))
 		for i, dt := range delays {
-			delayMillis[i] = int((dt + 499999) / 1000000)
+			delayMillis[i] = int((dt + 499999) / 1000000) // round up.
 		}
 		midHex := hex.EncodeToString([]byte(mid))
-		dump.MessageDelays[midHex] = delayMillis
+		dump.Delays.PerMessage[midHex] = delayMillis
 	}
 
-	delayCDF := make([]Sample, len(ts.delayCDF))
+	delayCDF := make([]Bucket, len(ts.delayCDF))
 	for i, s := range ts.delayCDF {
-		delayCDF[i] = Sample{DelayMillis: s.delay, Count: s.count}
+		delayCDF[i] = Bucket{Millis: s.delay, Count: s.count}
 	}
-	dump.MessageDelayCDF = delayCDF
+	dump.Delays.CDF = delayCDF
 
 	enc.Encode(dump)
+	return nil
 }
