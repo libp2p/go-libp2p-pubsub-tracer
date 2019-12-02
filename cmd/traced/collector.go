@@ -28,10 +28,10 @@ var (
 	// being rotated.
 	MaxLogTime = time.Hour
 
-	logger = logging.Logger("collectd")
+	logger = logging.Logger("tracecollector")
 )
 
-type Collector struct {
+type TraceCollector struct {
 	host host.Host
 	dir  string
 
@@ -44,16 +44,16 @@ type Collector struct {
 	doneCh        chan struct{}
 }
 
-// NewCollector creates a new pubsub traces collector. A collector is a process
+// NewTraceCollector creates a new pubsub traces collector. A collector is a process
 // that listens on a libp2p endpoint, accepts pubsub tracing streams from peers,
 // and records the incoming data into rotating gzip files.
-func NewCollector(host host.Host, dir string) (*Collector, error) {
+func NewTraceCollector(host host.Host, dir string) (*TraceCollector, error) {
 	err := os.MkdirAll(dir, 0755)
 	if err != nil {
 		return nil, err
 	}
 
-	c := &Collector{
+	c := &TraceCollector{
 		host:          host,
 		dir:           dir,
 		notifyWriteCh: make(chan struct{}, 1),
@@ -71,20 +71,20 @@ func NewCollector(host host.Host, dir string) (*Collector, error) {
 }
 
 // Stop stops the collector.
-func (c *Collector) Stop() {
-	close(c.exitCh)
-	c.flushFileCh <- struct{}{}
-	<-c.doneCh
+func (tc *TraceCollector) Stop() {
+	close(tc.exitCh)
+	tc.flushFileCh <- struct{}{}
+	<-tc.doneCh
 }
 
 // Flush flushes and rotates the current file.
-func (c *Collector) Flush() {
-	c.flushFileCh <- struct{}{}
+func (tc *TraceCollector) Flush() {
+	tc.flushFileCh <- struct{}{}
 }
 
 // handleStream accepts an incoming tracing stream and drains it into the
 // buffer, until the stream is closed or an error occurs.
-func (c *Collector) handleStream(s network.Stream) {
+func (tc *TraceCollector) handleStream(s network.Stream) {
 	defer s.Close()
 
 	logger.Debugf("new stream from %s", s.Conn().RemotePeer())
@@ -104,12 +104,12 @@ func (c *Collector) handleStream(s network.Stream) {
 
 		switch err = r.ReadMsg(&msg); err {
 		case nil:
-			c.mx.Lock()
-			c.buf = append(c.buf, msg.Batch...)
-			c.mx.Unlock()
+			tc.mx.Lock()
+			tc.buf = append(tc.buf, msg.Batch...)
+			tc.mx.Unlock()
 
 			select {
-			case c.notifyWriteCh <- struct{}{}:
+			case tc.notifyWriteCh <- struct{}{}:
 			default:
 			}
 
@@ -125,9 +125,14 @@ func (c *Collector) handleStream(s network.Stream) {
 
 // writeFile records incoming traces into a gzipped file, and yields every time
 // a flush is triggered.
-func (c *Collector) writeFile(out io.WriteCloser) (result error) {
+func (tc *TraceCollector) writeFile(out io.WriteCloser) (result error) {
 	var (
 		flush bool
+
+		// buf is an internal buffer that gets swapped with the collector's
+		// buffer on write. This saves allocs, and the slices grow to
+		// accommodate the volume that's being written.
+		buf []*pb.TraceEvent
 
 		gzipW = gzip.NewWriter(out)
 		w     = ggio.NewDelimitedWriter(gzipW)
@@ -135,17 +140,20 @@ func (c *Collector) writeFile(out io.WriteCloser) (result error) {
 
 	for !flush {
 		select {
-		case <-c.notifyWriteCh:
-		case <-c.flushFileCh:
+		case <-tc.notifyWriteCh:
+		case <-tc.flushFileCh:
 			flush = true
 		}
 
-		c.mx.Lock()
-		buf := make([]*pb.TraceEvent, 0, len(c.buf))
-		copy(buf, c.buf)
-
-		c.buf = c.buf[:0]
-		c.mx.Unlock()
+		// Swap the buffers. We take the collector's buffer, and replace that
+		// with our local buffer (trimmed to 0-length). On the next loop
+		// iteration, the same will occur, so we're effectively swapping buffers
+		// continuously.
+		tc.mx.Lock()
+		tmp := tc.buf
+		tc.buf = buf[:0]
+		buf = tmp
+		tc.mx.Unlock()
 
 		for i, evt := range buf {
 			err := w.WriteMsg(evt)
@@ -177,10 +185,10 @@ func (c *Collector) writeFile(out io.WriteCloser) (result error) {
 
 // collectWorker is the main worker. It keeps recording traces into the
 // `current` file and rotates the file when it's filled.
-func (c *Collector) collectWorker() {
-	defer close(c.doneCh)
+func (tc *TraceCollector) collectWorker() {
+	defer close(tc.doneCh)
 
-	current := fmt.Sprintf("%s/current", c.dir)
+	current := fmt.Sprintf("%s/current", tc.dir)
 
 	for {
 		out, err := os.OpenFile(current, os.O_CREATE|os.O_WRONLY, 0644)
@@ -188,13 +196,13 @@ func (c *Collector) collectWorker() {
 			panic(err)
 		}
 
-		err = c.writeFile(out)
+		err = tc.writeFile(out)
 		if err != nil {
 			panic(err)
 		}
 
 		// Rotate the file.
-		next := fmt.Sprintf("%s/trace.%d.pb.gz", c.dir, time.Now().UnixNano())
+		next := fmt.Sprintf("%s/trace.%d.pb.gz", tc.dir, time.Now().UnixNano())
 		logger.Debugf("move %s -> %s", current, next)
 		err = os.Rename(current, next)
 		if err != nil {
@@ -203,7 +211,7 @@ func (c *Collector) collectWorker() {
 
 		// yield if we're done.
 		select {
-		case <-c.exitCh:
+		case <-tc.exitCh:
 			return
 		default:
 		}
@@ -214,8 +222,8 @@ func (c *Collector) collectWorker() {
 // time and size.
 //
 // TODO (#3): this needs to use select so we can rcv from exitCh and yield.
-func (c *Collector) monitorWorker() {
-	current := fmt.Sprintf("%s/current", c.dir)
+func (tc *TraceCollector) monitorWorker() {
+	current := fmt.Sprintf("%s/current", tc.dir)
 
 Outer:
 	for {
@@ -228,7 +236,7 @@ Outer:
 			now := time.Now()
 			if now.After(start.Add(MaxLogTime)) {
 				select {
-				case c.flushFileCh <- struct{}{}:
+				case tc.flushFileCh <- struct{}{}:
 				default:
 				}
 				continue Outer
@@ -242,7 +250,7 @@ Outer:
 
 			if finfo.Size() > int64(MaxLogSize) {
 				select {
-				case c.flushFileCh <- struct{}{}:
+				case tc.flushFileCh <- struct{}{}:
 				default:
 				}
 

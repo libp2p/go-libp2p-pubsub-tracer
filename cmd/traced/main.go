@@ -21,7 +21,7 @@ import (
 func main() {
 	port := flag.Int("port", 4001, "port to listen to")
 	id := flag.String("id", "identity", "daemon identity file")
-	dir := flag.String("dir", "collectd.out", "trace log directory")
+	dir := flag.String("dir", "traced.out", "trace log directory")
 	flag.Parse()
 
 	var privkey crypto.PrivKey
@@ -69,7 +69,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	tr, err := NewCollector(host, *dir)
+	tr, err := NewTraceCollector(host, *dir)
 	if err != nil {
 		log.Fatal(err)
 	}
