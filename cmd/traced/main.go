@@ -16,7 +16,6 @@ import (
 
 	libp2p "github.com/libp2p/go-libp2p"
 	pnet "github.com/libp2p/go-libp2p-pnet"
-	tracer "github.com/libp2p/go-libp2p-pubsub-tracer"
 )
 
 func main() {
@@ -55,6 +54,8 @@ func main() {
 		libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/0.0.0.0/tcp/%d", *port)),
 	)
 
+	// PNET_KEY is an env variable and not an argument for security reasons:
+	// it's a key.
 	if pnk := os.Getenv("PNET_KEY"); pnk != "" {
 		protector, err := pnet.NewProtector(strings.NewReader(pnk))
 		if err != nil {
@@ -68,7 +69,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	tr, err := tracer.NewTracer(host, *dir)
+	tr, err := NewTraceCollector(host, *dir)
 	if err != nil {
 		log.Fatal(err)
 	}
