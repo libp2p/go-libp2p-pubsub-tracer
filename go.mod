@@ -4,7 +4,7 @@ go 1.13
 
 require (
 	github.com/gogo/protobuf v1.3.1
-	github.com/hashicorp/go-multierror v1.0.0
+	github.com/hashicorp/go-multierror v1.1.0
 	github.com/ipfs/go-log v0.0.1
 	github.com/libp2p/go-libp2p v0.5.1
 	github.com/libp2p/go-libp2p-core v0.2.5
