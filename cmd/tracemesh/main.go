@@ -81,6 +81,31 @@ func load(f string, mesh map[peer.ID]map[peer.ID]struct{}, topic string) error {
 
 func addEvent(evt *pb.TraceEvent, mesh map[peer.ID]map[peer.ID]struct{}, topic string) {
 	switch evt.GetType() {
+	case pb.TraceEvent_JOIN:
+		p := peer.ID(evt.GetPeerID())
+		join := evt.GetJoin()
+
+		et := join.GetTopic()
+		if et != topic {
+			break
+		}
+
+		_, ok := mesh[p]
+		if !ok {
+			mesh[p] = make(map[peer.ID]struct{})
+		}
+
+	case pb.TraceEvent_LEAVE:
+		p := peer.ID(evt.GetPeerID())
+		leave := evt.GetLeave()
+
+		et := leave.GetTopic()
+		if et != topic {
+			break
+		}
+
+		delete(mesh, p)
+
 	case pb.TraceEvent_GRAFT:
 		p := peer.ID(evt.GetPeerID())
 		graft := evt.GetGraft()
