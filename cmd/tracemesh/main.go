@@ -17,7 +17,7 @@ func main() {
 	var err error
 	defer func() {
 		if err != nil {
-			fmt.Println(err)
+			fmt.Fprintf(os.Stderr, "%s", err)
 			os.Exit(1)
 		}
 	}()
@@ -26,7 +26,7 @@ func main() {
 	flag.Parse()
 
 	if *topic == "" {
-		fmt.Printf("Topic must be specified")
+		fmt.Fprintf(os.Stderr, "Topic must be specified")
 		os.Exit(1)
 	}
 
@@ -41,15 +41,17 @@ func main() {
 
 	// print out the mesh
 	for p, peers := range mesh {
-		fmt.Printf("%s ", p)
+		fmt.Printf("%s ", p.Pretty())
 		for pp := range peers {
-			fmt.Printf("%s ", pp)
+			fmt.Printf("%s ", pp.Pretty())
 		}
 		fmt.Printf("\n")
 	}
 }
 
 func load(f string, mesh map[peer.ID]map[peer.ID]struct{}, topic string) error {
+	fmt.Fprintf(os.Stderr, "Processing %s\n", f)
+
 	r, err := os.Open(f)
 	if err != nil {
 		return fmt.Errorf("error opening trace file %s: %w", f, err)
