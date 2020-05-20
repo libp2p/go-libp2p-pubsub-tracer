@@ -32,19 +32,42 @@ func main() {
 	summary := flag.Bool("summary", true, "print trace summary")
 	cdf := flag.Bool("cdf", false, "print propagation delay CDF")
 	jsonOut := flag.String("json", "", "save analysis output to json file")
+	topic := flag.String("topic", "", "analyze traces for a specific topic only")
 	flag.Parse()
 
 	stat := &tracestat{
-		peers:  make(map[peer.ID]*msgstat),
-		topics: make(map[string]struct{}),
-		msgs:   make(map[string][]int64),
-		delays: make(map[string][]int64),
+		peers:       make(map[peer.ID]*msgstat),
+		topics:      make(map[string]struct{}),
+		msgsInTopic: make(map[string]struct{}),
+		msgs:        make(map[string][]int64),
+		delays:      make(map[string][]int64),
 	}
 
-	for _, f := range flag.Args() {
-		err = stat.load(f)
-		if err != nil {
-			return
+	if *topic != "" {
+		// do a first pass to get the msgIDs in the topic
+		for _, f := range flag.Args() {
+			err = load(f, func(evt *pb.TraceEvent) {
+				stat.markEventForTopic(evt, *topic)
+			})
+			if err != nil {
+				return
+			}
+		}
+
+		// and now do a second pass adding events for the relevant topic only
+		for _, f := range flag.Args() {
+			err = load(f, stat.addEventForTopic)
+			if err != nil {
+				return
+			}
+		}
+
+	} else {
+		for _, f := range flag.Args() {
+			err = load(f, stat.addEvent)
+			if err != nil {
+				return
+			}
 		}
 	}
 
@@ -72,6 +95,9 @@ type tracestat struct {
 
 	// topics is tha map of topics recorded in the trace
 	topics map[string]struct{}
+
+	// msgsInTopic contains a set of message IDs in the target topic
+	msgsInTopic map[string]struct{}
 
 	// aggregate stats.
 	aggregate msgstat
@@ -104,7 +130,7 @@ type sample struct {
 	count int
 }
 
-func (ts *tracestat) load(f string) error {
+func load(f string, addEvent func(*pb.TraceEvent)) error {
 	r, err := os.Open(f)
 	if err != nil {
 		return fmt.Errorf("error opening trace file %s: %w", f, err)
@@ -125,12 +151,52 @@ func (ts *tracestat) load(f string) error {
 
 		switch err = pbr.ReadMsg(&evt); err {
 		case nil:
-			ts.addEvent(&evt)
+			addEvent(&evt)
 		case io.EOF:
 			return nil
 		default:
 			return fmt.Errorf("error decoding trace event from %s: %w", f, err)
 		}
+	}
+}
+
+func (ts *tracestat) markEventForTopic(evt *pb.TraceEvent, topic string) {
+	switch evt.GetType() {
+	case pb.TraceEvent_PUBLISH_MESSAGE:
+		for _, msgTopic := range evt.GetPublishMessage().GetTopics() {
+			if msgTopic == topic {
+				mid := string(evt.GetPublishMessage().GetMessageID())
+				ts.msgsInTopic[mid] = struct{}{}
+				break
+			}
+		}
+	}
+}
+
+func (ts *tracestat) addEventForTopic(evt *pb.TraceEvent) {
+	addEventInTopic := func(evt *pb.TraceEvent, mid string) {
+		_, ok := ts.msgsInTopic[mid]
+		if ok {
+			ts.addEvent(evt)
+		}
+	}
+
+	switch evt.GetType() {
+	case pb.TraceEvent_PUBLISH_MESSAGE:
+		mid := string(evt.GetPublishMessage().GetMessageID())
+		addEventInTopic(evt, mid)
+
+	case pb.TraceEvent_REJECT_MESSAGE:
+		mid := string(evt.GetRejectMessage().GetMessageID())
+		addEventInTopic(evt, mid)
+
+	case pb.TraceEvent_DUPLICATE_MESSAGE:
+		mid := string(evt.GetDuplicateMessage().GetMessageID())
+		addEventInTopic(evt, mid)
+
+	case pb.TraceEvent_DELIVER_MESSAGE:
+		mid := string(evt.GetDeliverMessage().GetMessageID())
+		addEventInTopic(evt, mid)
 	}
 }
 
