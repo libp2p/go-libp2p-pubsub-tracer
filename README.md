@@ -46,9 +46,10 @@ This is a trace analysis tool, that can analyze one or more trace files.
 
 Usage:
 ```
-tracestat [-summary] [-cdf] [-json <file>] <trace-file> ...
+tracestat [-summary] [-cdf] [-json <file>] [-topic <topic>] <trace-file> ...
 
   -summary: Print an analysis summary to stdout; defaults to true
   -cdf: Print a CDF of message propagation delays to stdout; defaults to false
   -json <file>: Output the result of the analysis to a json file for further processing by other tools
+  -topic <topic>: Analyze messages only for a specific topic
 ```
