@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/libp2p/go-libp2p-core/peer"
 	pb "github.com/libp2p/go-libp2p-pubsub/pb"
@@ -35,6 +36,7 @@ func main() {
 
 	stat := &tracestat{
 		peers:  make(map[peer.ID]*msgstat),
+		topics: make(map[string]struct{}),
 		msgs:   make(map[string][]int64),
 		delays: make(map[string][]int64),
 	}
@@ -67,6 +69,9 @@ func main() {
 type tracestat struct {
 	// peers summarizes per-peer stats.
 	peers map[peer.ID]*msgstat
+
+	// topics is tha map of topics recorded in the trace
+	topics map[string]struct{}
 
 	// aggregate stats.
 	aggregate msgstat
@@ -147,6 +152,9 @@ func (ts *tracestat) addEvent(evt *pb.TraceEvent) {
 		ts.aggregate.publish++
 		mid := string(evt.GetPublishMessage().GetMessageID())
 		ts.msgs[mid] = append(ts.msgs[mid], timestamp)
+		for _, topic := range evt.GetPublishMessage().GetTopics() {
+			ts.topics[topic] = struct{}{}
+		}
 
 	case pb.TraceEvent_REJECT_MESSAGE:
 		ps.reject++
@@ -212,6 +220,7 @@ func (ts *tracestat) compute() {
 func (ts *tracestat) printSummary() {
 	fmt.Printf("=== Trace Summary ===\n")
 	fmt.Printf("Peers: %d\n", len(ts.peers))
+	fmt.Printf("Topics: %s\n", topicList(ts.topics))
 	fmt.Printf("Published Messages: %d\n", ts.aggregate.publish)
 	fmt.Printf("Delivered Messages: %d\n", ts.aggregate.deliver)
 	fmt.Printf("Duplicate Messages: %d\n", ts.aggregate.duplicate)
@@ -299,4 +308,12 @@ func (ts *tracestat) dumpJSON(f string) error {
 
 	enc.Encode(dump)
 	return nil
+}
+
+func topicList(topics map[string]struct{}) string {
+	var lst []string
+	for topic := range topics {
+		lst = append(lst, topic)
+	}
+	return strings.Join(lst, ",")
 }
