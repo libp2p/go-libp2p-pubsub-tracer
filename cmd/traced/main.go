@@ -13,9 +13,11 @@ import (
 
 	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/pnet"
 
 	libp2p "github.com/libp2p/go-libp2p"
-	pnet "github.com/libp2p/go-libp2p-pnet"
+
+	"github.com/libp2p/go-libp2p-pubsub-tracer/traced"
 )
 
 func main() {
@@ -57,11 +59,11 @@ func main() {
 	// PNET_KEY is an env variable and not an argument for security reasons:
 	// it's a key.
 	if pnk := os.Getenv("PNET_KEY"); pnk != "" {
-		protector, err := pnet.NewProtector(strings.NewReader(pnk))
+		psk, err := pnet.DecodeV1PSK(strings.NewReader(pnk))
 		if err != nil {
 			log.Fatal(err)
 		}
-		opts = append(opts, libp2p.PrivateNetwork(protector))
+		opts = append(opts, libp2p.PrivateNetwork(psk))
 	}
 
 	host, err := libp2p.New(context.Background(), opts...)
@@ -69,7 +71,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	tr, err := NewTraceCollector(host, *dir)
+	tr, err := traced.NewTraceCollector(host, *dir)
 	if err != nil {
 		log.Fatal(err)
 	}
