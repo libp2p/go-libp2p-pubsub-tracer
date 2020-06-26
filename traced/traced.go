@@ -1,4 +1,4 @@
-package main
+package traced
 
 import (
 	"compress/gzip"

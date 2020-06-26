@@ -16,6 +16,8 @@ import (
 	"github.com/libp2p/go-libp2p-core/pnet"
 
 	libp2p "github.com/libp2p/go-libp2p"
+
+	"github.com/libp2p/go-libp2p-pubsub-tracer/traced"
 )
 
 func main() {
@@ -69,7 +71,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	tr, err := NewTraceCollector(host, *dir)
+	tr, err := traced.NewTraceCollector(host, *dir)
 	if err != nil {
 		log.Fatal(err)
 	}
