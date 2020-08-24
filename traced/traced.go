@@ -96,7 +96,7 @@ func (tc *TraceCollector) handleStream(s network.Stream) {
 		return
 	}
 
-	r := ggio.NewDelimitedReader(gzipR, 1<<24)
+	r := ggio.NewDelimitedReader(gzipR, 1<<20)
 	var msg pb.TraceEventBatch
 
 	for {
