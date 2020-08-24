@@ -28,7 +28,7 @@ var (
 	// being rotated.
 	MaxLogTime = time.Hour
 
-	logger = logging.Logger("tracecollector")
+	logger = logging.Logger("traced")
 )
 
 type TraceCollector struct {
@@ -96,7 +96,7 @@ func (tc *TraceCollector) handleStream(s network.Stream) {
 		return
 	}
 
-	r := ggio.NewDelimitedReader(gzipR, 1<<24)
+	r := ggio.NewDelimitedReader(gzipR, 1<<20)
 	var msg pb.TraceEventBatch
 
 	for {
