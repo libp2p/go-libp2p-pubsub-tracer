@@ -16,6 +16,8 @@ import (
 	"github.com/libp2p/go-libp2p-core/pnet"
 
 	libp2p "github.com/libp2p/go-libp2p"
+	noise "github.com/libp2p/go-libp2p-noise"
+	tls "github.com/libp2p/go-libp2p-tls"
 
 	"github.com/libp2p/go-libp2p-pubsub-tracer/traced"
 )
@@ -54,6 +56,8 @@ func main() {
 	opts = append(opts,
 		libp2p.Identity(privkey),
 		libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/0.0.0.0/tcp/%d", *port)),
+		libp2p.Security(noise.ID, noise.New),
+		libp2p.Security(tls.ID, tls.New),
 	)
 
 	// PNET_KEY is an env variable and not an argument for security reasons:
