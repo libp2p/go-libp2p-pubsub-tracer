@@ -19,6 +19,8 @@ import (
 	noise "github.com/libp2p/go-libp2p-noise"
 	tls "github.com/libp2p/go-libp2p-tls"
 
+	logging "github.com/ipfs/go-log"
+
 	"github.com/libp2p/go-libp2p-pubsub-tracer/traced"
 )
 
@@ -79,6 +81,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	logging.SetLogLevel("traced", "DEBUG")
 
 	sigch := make(chan os.Signal, 1)
 	signal.Notify(sigch, syscall.SIGINT, syscall.SIGHUP, syscall.SIGTERM)

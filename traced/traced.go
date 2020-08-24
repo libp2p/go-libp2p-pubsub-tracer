@@ -28,7 +28,7 @@ var (
 	// being rotated.
 	MaxLogTime = time.Hour
 
-	logger = logging.Logger("tracecollector")
+	logger = logging.Logger("traced")
 )
 
 type TraceCollector struct {
