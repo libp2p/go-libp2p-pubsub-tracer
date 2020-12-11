@@ -242,7 +242,7 @@ func (tc *TraceCollector) writeJsonTrace(trace string) {
 	}
 	defer gzipR.Close()
 
-	out, err := os.OpenFile(tc.jsonTrace, os.O_WRONLY|os.O_TRUNC, 0644)
+	out, err := os.OpenFile(tc.jsonTrace, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
 	if err != nil {
 		panic(err)
 	}
