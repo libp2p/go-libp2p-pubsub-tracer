@@ -6,17 +6,21 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/libp2p/go-libp2p-core/host"
 	"github.com/libp2p/go-libp2p-core/network"
-
+	"github.com/libp2p/go-libp2p-core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/multiformats/go-multiaddr"
+	manet "github.com/multiformats/go-multiaddr/net"
+
 	pb "github.com/libp2p/go-libp2p-pubsub/pb"
 
 	ggio "github.com/gogo/protobuf/io"
-	multierror "github.com/hashicorp/go-multierror"
+	"github.com/hashicorp/go-multierror"
 	logging "github.com/ipfs/go-log"
 )
 
@@ -32,13 +36,22 @@ var (
 	logger = logging.Logger("traced")
 )
 
-type TraceCollector struct {
-	host      host.Host
-	dir       string
-	jsonTrace string
+type JSONTraceEvent struct {
+	*pb.TraceEvent
+	IP     string `json:"ip"`
+	PeerID string `json:"peerID"`
+}
 
-	mx  sync.Mutex
-	buf []*pb.TraceEvent
+type TraceCollector struct {
+	host host.Host
+	dir  string
+
+	json    bool
+	jsonDir string
+
+	mx        sync.Mutex
+	buf       []*pb.TraceEvent
+	bufremote multiaddr.Multiaddr // remote multiaddr of the peer whose events are in the buffer.
 
 	notifyWriteCh chan struct{}
 	flushFileCh   chan struct{}
@@ -51,16 +64,24 @@ type TraceCollector struct {
 // and records the incoming data into rotating gzip files.
 // If the json argument is not empty, then every time a new trace is generated, it will be written
 // to this directory in json format for online processing.
-func NewTraceCollector(host host.Host, dir, jsonTrace string) (*TraceCollector, error) {
+func NewTraceCollector(host host.Host, dir, jsonDir string) (*TraceCollector, error) {
 	err := os.MkdirAll(dir, 0755)
 	if err != nil {
 		return nil, err
 	}
 
+	if jsonDir != "" {
+		err := os.MkdirAll(jsonDir, 0755)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	c := &TraceCollector{
 		host:          host,
 		dir:           dir,
-		jsonTrace:     jsonTrace,
+		json:          jsonDir != "",
+		jsonDir:       jsonDir,
 		notifyWriteCh: make(chan struct{}, 1),
 		flushFileCh:   make(chan struct{}, 1),
 		exitCh:        make(chan struct{}, 1),
@@ -111,6 +132,7 @@ func (tc *TraceCollector) handleStream(s network.Stream) {
 		case nil:
 			tc.mx.Lock()
 			tc.buf = append(tc.buf, msg.Batch...)
+			tc.bufremote = s.Conn().RemoteMultiaddr()
 			tc.mx.Unlock()
 
 			select {
@@ -128,9 +150,9 @@ func (tc *TraceCollector) handleStream(s network.Stream) {
 	}
 }
 
-// writeFile records incoming traces into a gzipped file, and yields every time
+// writeFiles records incoming traces into a gzipped file, and yields every time
 // a flush is triggered.
-func (tc *TraceCollector) writeFile(out io.WriteCloser) (result error) {
+func (tc *TraceCollector) writeFiles(out io.WriteCloser, jsonOut io.WriteCloser) (result error) {
 	var (
 		flush bool
 
@@ -141,7 +163,14 @@ func (tc *TraceCollector) writeFile(out io.WriteCloser) (result error) {
 
 		gzipW = gzip.NewWriter(out)
 		w     = ggio.NewDelimitedWriter(gzipW)
+
+		jsonEncoder *json.Encoder
 	)
+
+	if jsonOut != nil {
+		jsonEncoder = json.NewEncoder(jsonOut)
+		defer jsonOut.Close()
+	}
 
 	for !flush {
 		select {
@@ -156,22 +185,53 @@ func (tc *TraceCollector) writeFile(out io.WriteCloser) (result error) {
 		// continuously.
 		tc.mx.Lock()
 		tmp := tc.buf
+		maddr := tc.bufremote
 		tc.buf = buf[:0]
 		buf = tmp
 		tc.mx.Unlock()
 
 		for i, evt := range buf {
+			buf[i] = nil
+
+			// write to the binary output.
 			err := w.WriteMsg(evt)
 			if err != nil {
 				logger.Errorf("error writing event trace: %s", err)
 				return err
 			}
 
-			buf[i] = nil
+			if jsonEncoder == nil {
+				continue
+			}
+
+			// patch the timestamp to drop the microsecond and nanosecond portions.
+			*evt.Timestamp /= int64(time.Millisecond)
+
+			var (
+				peerID string
+				ip     string
+			)
+			// parse the peer ID.
+			if id, err := peer.IDFromBytes(evt.PeerID); err == nil {
+				peerID = id.String()
+			}
+			// extract the IP address from the multiaddr.
+			if ipaddr, err := manet.ToIP(maddr); err == nil {
+				ip = ipaddr.String()
+			}
+			err = jsonEncoder.Encode(JSONTraceEvent{
+				TraceEvent: evt,
+				IP:         ip,
+				PeerID:     peerID,
+			})
+			if err != nil {
+				logger.Errorf("error writing JSON trace: %s", err)
+				return err
+			}
 		}
 	}
 
-	logger.Debugf("closing trace log")
+	logger.Debugf("closing trace logs")
 
 	err := gzipW.Close()
 	if err != nil {
@@ -189,35 +249,58 @@ func (tc *TraceCollector) writeFile(out io.WriteCloser) (result error) {
 }
 
 // collectWorker is the main worker. It keeps recording traces into the
-// `current` file and rotates the file when it's filled.
+// `current` files and rotates them when filled.
 func (tc *TraceCollector) collectWorker() {
 	defer close(tc.doneCh)
 
-	current := fmt.Sprintf("%s/current", tc.dir)
+	var (
+		currentBin  = filepath.Join(tc.dir, "current")
+		currentJSON string
+	)
+
+	if tc.json {
+		currentJSON = filepath.Join(tc.jsonDir, "current")
+	}
 
 	for {
-		out, err := os.OpenFile(current, os.O_CREATE|os.O_WRONLY, 0644)
+		// (re-)create the binary file.
+		binaryOut, err := os.OpenFile(currentBin, os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			panic(err)
 		}
 
-		err = tc.writeFile(out)
+		// (re-)create the json file, if emitting json.
+		var jsonOut *os.File
+		if tc.json {
+			jsonOut, err = os.OpenFile(currentJSON, os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				panic(err)
+			}
+		}
+
+		err = tc.writeFiles(binaryOut, jsonOut)
 		if err != nil {
 			panic(err)
 		}
 
-		// Rotate the file.
 		base := fmt.Sprintf("trace.%d", time.Now().UnixNano())
-		next := fmt.Sprintf("%s/%s.pb.gz", tc.dir, base)
-		logger.Debugf("move %s -> %s", current, next)
-		err = os.Rename(current, next)
+
+		// Rotate the binary file.
+		archiveBin := filepath.Join(tc.dir, base+".pb.gz")
+		logger.Debugf("move %s -> %s", currentBin, archiveBin)
+		err = os.Rename(currentBin, archiveBin)
 		if err != nil {
 			panic(err)
 		}
 
-		// Generate the json output if so desired
-		if tc.jsonTrace != "" {
-			tc.writeJsonTrace(next, base)
+		// Rotate the JSON file.
+		if tc.json {
+			archiveJSON := filepath.Join(tc.dir, base+".json")
+			logger.Debugf("move %s -> %s", currentJSON, archiveJSON)
+			err = os.Rename(currentJSON, archiveJSON)
+			if err != nil {
+				panic(err)
+			}
 		}
 
 		// yield if we're done.
@@ -226,59 +309,6 @@ func (tc *TraceCollector) collectWorker() {
 			return
 		default:
 		}
-	}
-}
-
-func (tc *TraceCollector) writeJsonTrace(trace, name string) {
-	// open the trace, read it and transcode to json
-	in, err := os.Open(trace)
-	if err != nil {
-		panic(err)
-	}
-	defer in.Close()
-
-	gzipR, err := gzip.NewReader(in)
-	if err != nil {
-		panic(err)
-	}
-	defer gzipR.Close()
-
-	tmpTrace := fmt.Sprintf("/tmp/%s.json", name)
-	out, err := os.OpenFile(tmpTrace, os.O_WRONLY|os.O_CREATE, 0644)
-	if err != nil {
-		panic(err)
-	}
-
-	var evt pb.TraceEvent
-	pbr := ggio.NewDelimitedReader(gzipR, 1<<20)
-	enc := json.NewEncoder(out)
-
-loop:
-	for {
-		evt.Reset()
-
-		switch err = pbr.ReadMsg(&evt); err {
-		case nil:
-			err = enc.Encode(&evt)
-			if err != nil {
-				panic(err)
-			}
-		case io.EOF:
-			break loop
-		default:
-			panic(err)
-		}
-	}
-
-	err = out.Close()
-	if err != nil {
-		panic(err)
-	}
-
-	jsonTrace := fmt.Sprintf("%s/%s.json", tc.jsonTrace, name)
-	err = os.Rename(tmpTrace, jsonTrace)
-	if err != nil {
-		panic(err)
 	}
 }
 
