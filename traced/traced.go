@@ -2,6 +2,7 @@ package traced
 
 import (
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -32,8 +33,9 @@ var (
 )
 
 type TraceCollector struct {
-	host host.Host
-	dir  string
+	host      host.Host
+	dir       string
+	jsonTrace string
 
 	mx  sync.Mutex
 	buf []*pb.TraceEvent
@@ -47,7 +49,9 @@ type TraceCollector struct {
 // NewTraceCollector creates a new pubsub traces collector. A collector is a process
 // that listens on a libp2p endpoint, accepts pubsub tracing streams from peers,
 // and records the incoming data into rotating gzip files.
-func NewTraceCollector(host host.Host, dir string) (*TraceCollector, error) {
+// If the json argument is not empty, then every time a new trace is generated, it will be written
+// to this file in json format for online processing.
+func NewTraceCollector(host host.Host, dir, jsonTrace string) (*TraceCollector, error) {
 	err := os.MkdirAll(dir, 0755)
 	if err != nil {
 		return nil, err
@@ -56,6 +60,7 @@ func NewTraceCollector(host host.Host, dir string) (*TraceCollector, error) {
 	c := &TraceCollector{
 		host:          host,
 		dir:           dir,
+		jsonTrace:     jsonTrace,
 		notifyWriteCh: make(chan struct{}, 1),
 		flushFileCh:   make(chan struct{}, 1),
 		exitCh:        make(chan struct{}, 1),
@@ -209,11 +214,57 @@ func (tc *TraceCollector) collectWorker() {
 			panic(err)
 		}
 
+		// Generate the json output if so desired
+		if tc.jsonTrace != "" {
+			tc.writeJsonTrace(next)
+		}
+
 		// yield if we're done.
 		select {
 		case <-tc.exitCh:
 			return
 		default:
+		}
+	}
+}
+
+func (tc *TraceCollector) writeJsonTrace(trace string) {
+	// open the trace, read it and transcode to json
+	in, err := os.Open(trace)
+	if err != nil {
+		panic(err)
+	}
+	defer in.Close()
+
+	gzipR, err := gzip.NewReader(in)
+	if err != nil {
+		panic(err)
+	}
+	defer gzipR.Close()
+
+	out, err := os.OpenFile(tc.jsonTrace, os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		panic(err)
+	}
+	defer out.Close()
+
+	var evt pb.TraceEvent
+	pbr := ggio.NewDelimitedReader(gzipR, 1<<20)
+	enc := json.NewEncoder(out)
+
+	for {
+		evt.Reset()
+
+		switch err = pbr.ReadMsg(&evt); err {
+		case nil:
+			err = enc.Encode(&evt)
+			if err != nil {
+				panic(err)
+			}
+		case io.EOF:
+			return
+		default:
+			panic(err)
 		}
 	}
 }
