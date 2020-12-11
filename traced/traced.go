@@ -207,7 +207,8 @@ func (tc *TraceCollector) collectWorker() {
 		}
 
 		// Rotate the file.
-		next := fmt.Sprintf("%s/trace.%d.pb.gz", tc.dir, time.Now().UnixNano())
+		base := fmt.Sprintf("trace.%d", time.Now().UnixNano())
+		next := fmt.Sprintf("%s/%s.pb.gz", tc.dir, base)
 		logger.Debugf("move %s -> %s", current, next)
 		err = os.Rename(current, next)
 		if err != nil {
@@ -216,7 +217,7 @@ func (tc *TraceCollector) collectWorker() {
 
 		// Generate the json output if so desired
 		if tc.jsonTrace != "" {
-			tc.writeJsonTrace(next)
+			tc.writeJsonTrace(next, base)
 		}
 
 		// yield if we're done.
@@ -228,7 +229,7 @@ func (tc *TraceCollector) collectWorker() {
 	}
 }
 
-func (tc *TraceCollector) writeJsonTrace(trace string) {
+func (tc *TraceCollector) writeJsonTrace(trace, name string) {
 	// open the trace, read it and transcode to json
 	in, err := os.Open(trace)
 	if err != nil {
@@ -242,7 +243,7 @@ func (tc *TraceCollector) writeJsonTrace(trace string) {
 	}
 	defer gzipR.Close()
 
-	out, err := os.OpenFile(fmt.Sprintf("%s/%s.json", tc.jsonTrace, trace), os.O_WRONLY|os.O_CREATE, 0644)
+	out, err := os.OpenFile(fmt.Sprintf("%s/%s.json", tc.jsonTrace, name), os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
 		panic(err)
 	}
