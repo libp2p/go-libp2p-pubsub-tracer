@@ -28,7 +28,7 @@ func main() {
 	port := flag.Int("port", 4001, "port to listen to")
 	id := flag.String("id", "identity", "daemon identity file")
 	dir := flag.String("dir", "traced.out", "trace log directory")
-	jsonTrace := flag.String("json", "", "json trace file")
+	jsonTrace := flag.String("json", "", "json trace directory")
 	flag.Parse()
 
 	var privkey crypto.PrivKey

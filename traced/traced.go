@@ -50,7 +50,7 @@ type TraceCollector struct {
 // that listens on a libp2p endpoint, accepts pubsub tracing streams from peers,
 // and records the incoming data into rotating gzip files.
 // If the json argument is not empty, then every time a new trace is generated, it will be written
-// to this file in json format for online processing.
+// to this directory in json format for online processing.
 func NewTraceCollector(host host.Host, dir, jsonTrace string) (*TraceCollector, error) {
 	err := os.MkdirAll(dir, 0755)
 	if err != nil {
@@ -242,7 +242,7 @@ func (tc *TraceCollector) writeJsonTrace(trace string) {
 	}
 	defer gzipR.Close()
 
-	out, err := os.OpenFile(tc.jsonTrace, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0644)
+	out, err := os.OpenFile(fmt.Sprintf("%s/%s.json", tc.jsonTrace, trace), os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
 		panic(err)
 	}
