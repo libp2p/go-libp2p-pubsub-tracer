@@ -243,16 +243,17 @@ func (tc *TraceCollector) writeJsonTrace(trace, name string) {
 	}
 	defer gzipR.Close()
 
-	out, err := os.OpenFile(fmt.Sprintf("%s/%s.json", tc.jsonTrace, name), os.O_WRONLY|os.O_CREATE, 0644)
+	tmpTrace := fmt.Sprintf("/tmp/%s.json", name)
+	out, err := os.OpenFile(tmpTrace, os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
 		panic(err)
 	}
-	defer out.Close()
 
 	var evt pb.TraceEvent
 	pbr := ggio.NewDelimitedReader(gzipR, 1<<20)
 	enc := json.NewEncoder(out)
 
+loop:
 	for {
 		evt.Reset()
 
@@ -263,10 +264,21 @@ func (tc *TraceCollector) writeJsonTrace(trace, name string) {
 				panic(err)
 			}
 		case io.EOF:
-			return
+			break loop
 		default:
 			panic(err)
 		}
+	}
+
+	err = out.Close()
+	if err != nil {
+		panic(err)
+	}
+
+	jsonTrace := fmt.Sprintf("%s/%s.json", tc.jsonTrace, name)
+	err = os.Rename(tmpTrace, jsonTrace)
+	if err != nil {
+		panic(err)
 	}
 }
 
