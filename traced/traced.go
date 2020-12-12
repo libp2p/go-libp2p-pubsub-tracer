@@ -2,6 +2,7 @@ package traced
 
 import (
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -32,8 +33,9 @@ var (
 )
 
 type TraceCollector struct {
-	host host.Host
-	dir  string
+	host      host.Host
+	dir       string
+	jsonTrace string
 
 	mx  sync.Mutex
 	buf []*pb.TraceEvent
@@ -47,7 +49,9 @@ type TraceCollector struct {
 // NewTraceCollector creates a new pubsub traces collector. A collector is a process
 // that listens on a libp2p endpoint, accepts pubsub tracing streams from peers,
 // and records the incoming data into rotating gzip files.
-func NewTraceCollector(host host.Host, dir string) (*TraceCollector, error) {
+// If the json argument is not empty, then every time a new trace is generated, it will be written
+// to this directory in json format for online processing.
+func NewTraceCollector(host host.Host, dir, jsonTrace string) (*TraceCollector, error) {
 	err := os.MkdirAll(dir, 0755)
 	if err != nil {
 		return nil, err
@@ -56,6 +60,7 @@ func NewTraceCollector(host host.Host, dir string) (*TraceCollector, error) {
 	c := &TraceCollector{
 		host:          host,
 		dir:           dir,
+		jsonTrace:     jsonTrace,
 		notifyWriteCh: make(chan struct{}, 1),
 		flushFileCh:   make(chan struct{}, 1),
 		exitCh:        make(chan struct{}, 1),
@@ -96,7 +101,7 @@ func (tc *TraceCollector) handleStream(s network.Stream) {
 		return
 	}
 
-	r := ggio.NewDelimitedReader(gzipR, 1<<20)
+	r := ggio.NewDelimitedReader(gzipR, 1<<22)
 	var msg pb.TraceEventBatch
 
 	for {
@@ -202,11 +207,17 @@ func (tc *TraceCollector) collectWorker() {
 		}
 
 		// Rotate the file.
-		next := fmt.Sprintf("%s/trace.%d.pb.gz", tc.dir, time.Now().UnixNano())
+		base := fmt.Sprintf("trace.%d", time.Now().UnixNano())
+		next := fmt.Sprintf("%s/%s.pb.gz", tc.dir, base)
 		logger.Debugf("move %s -> %s", current, next)
 		err = os.Rename(current, next)
 		if err != nil {
 			panic(err)
+		}
+
+		// Generate the json output if so desired
+		if tc.jsonTrace != "" {
+			tc.writeJsonTrace(next, base)
 		}
 
 		// yield if we're done.
@@ -215,6 +226,59 @@ func (tc *TraceCollector) collectWorker() {
 			return
 		default:
 		}
+	}
+}
+
+func (tc *TraceCollector) writeJsonTrace(trace, name string) {
+	// open the trace, read it and transcode to json
+	in, err := os.Open(trace)
+	if err != nil {
+		panic(err)
+	}
+	defer in.Close()
+
+	gzipR, err := gzip.NewReader(in)
+	if err != nil {
+		panic(err)
+	}
+	defer gzipR.Close()
+
+	tmpTrace := fmt.Sprintf("/tmp/%s.json", name)
+	out, err := os.OpenFile(tmpTrace, os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		panic(err)
+	}
+
+	var evt pb.TraceEvent
+	pbr := ggio.NewDelimitedReader(gzipR, 1<<20)
+	enc := json.NewEncoder(out)
+
+loop:
+	for {
+		evt.Reset()
+
+		switch err = pbr.ReadMsg(&evt); err {
+		case nil:
+			err = enc.Encode(&evt)
+			if err != nil {
+				panic(err)
+			}
+		case io.EOF:
+			break loop
+		default:
+			panic(err)
+		}
+	}
+
+	err = out.Close()
+	if err != nil {
+		panic(err)
+	}
+
+	jsonTrace := fmt.Sprintf("%s/%s.json", tc.jsonTrace, name)
+	err = os.Rename(tmpTrace, jsonTrace)
+	if err != nil {
+		panic(err)
 	}
 }
 

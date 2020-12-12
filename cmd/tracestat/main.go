@@ -163,12 +163,11 @@ func load(f string, addEvent func(*pb.TraceEvent)) error {
 func (ts *tracestat) markEventForTopic(evt *pb.TraceEvent, topic string) {
 	switch evt.GetType() {
 	case pb.TraceEvent_PUBLISH_MESSAGE:
-		for _, msgTopic := range evt.GetPublishMessage().GetTopics() {
-			if msgTopic == topic {
-				mid := string(evt.GetPublishMessage().GetMessageID())
-				ts.msgsInTopic[mid] = struct{}{}
-				break
-			}
+		msgTopic := evt.GetPublishMessage().GetTopic()
+		if msgTopic == topic {
+			mid := string(evt.GetPublishMessage().GetMessageID())
+			ts.msgsInTopic[mid] = struct{}{}
+			break
 		}
 	}
 }
@@ -218,9 +217,8 @@ func (ts *tracestat) addEvent(evt *pb.TraceEvent) {
 		ts.aggregate.publish++
 		mid := string(evt.GetPublishMessage().GetMessageID())
 		ts.msgs[mid] = append(ts.msgs[mid], timestamp)
-		for _, topic := range evt.GetPublishMessage().GetTopics() {
-			ts.topics[topic] = struct{}{}
-		}
+		topic := evt.GetPublishMessage().GetTopic()
+		ts.topics[topic] = struct{}{}
 
 	case pb.TraceEvent_REJECT_MESSAGE:
 		ps.reject++
