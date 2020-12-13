@@ -12,4 +12,5 @@ require (
 	github.com/libp2p/go-libp2p-pubsub v0.4.0
 	github.com/libp2p/go-libp2p-tls v0.1.3
 	github.com/multiformats/go-multiaddr v0.3.1
+	github.com/stretchr/testify v1.6.1
 )

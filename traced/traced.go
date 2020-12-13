@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,12 +37,6 @@ var (
 
 	logger = logging.Logger("traced")
 )
-
-type JSONTraceEvent struct {
-	*pb.TraceEvent
-	IP     string `json:"ip"`
-	PeerID string `json:"peerID"`
-}
 
 type TraceCollector struct {
 	host host.Host
@@ -204,27 +200,18 @@ func (tc *TraceCollector) writeFiles(out io.WriteCloser, jsonOut io.WriteCloser)
 				continue
 			}
 
-			// patch the timestamp to drop the microsecond and nanosecond portions.
-			*evt.Timestamp /= int64(time.Millisecond)
+			// convert the event to a map[string]interface{} for easier manipulation.
+			m := structMap(evt)
 
-			var (
-				peerID string
-				ip     string
-			)
-			// parse the peer ID.
-			if id, err := peer.IDFromBytes(evt.PeerID); err == nil {
-				peerID = id.String()
-			}
-			// extract the IP address from the multiaddr.
+			// transform the event.
+			m = transformRec(m)
+
+			// enrich with the IP address from the multiaddr.
 			if ipaddr, err := manet.ToIP(maddr); err == nil {
-				ip = ipaddr.String()
+				m["ip"] = ipaddr.String()
 			}
-			err = jsonEncoder.Encode(JSONTraceEvent{
-				TraceEvent: evt,
-				IP:         ip,
-				PeerID:     peerID,
-			})
-			if err != nil {
+
+			if err = jsonEncoder.Encode(m); err != nil {
 				logger.Errorf("error writing JSON trace: %s", err)
 				return err
 			}
@@ -352,4 +339,59 @@ Outer:
 			}
 		}
 	}
+}
+
+func structMap(obj interface{}) map[string]interface{} {
+	if obj == nil {
+		return map[string]interface{}{}
+	}
+
+	var (
+		ret = make(map[string]interface{})
+		typ = reflect.TypeOf(obj)
+		val = reflect.Indirect(reflect.ValueOf(obj))
+	)
+
+	if typ.Kind() == reflect.Ptr {
+		typ = typ.Elem()
+	}
+
+	for i := 0; i < typ.NumField(); i++ {
+		tag := typ.Field(i).Tag.Get("json") // json tag.
+		fieldValue := val.Field(i)
+		if tag == "" || tag == "-" || fieldValue.IsZero() { // skip if no tag, or -, or field is zero.
+			continue
+		}
+		tag = strings.Split(tag, ",")[0]
+		if ftyp := typ.Field(i).Type; ftyp.Kind() == reflect.Struct ||
+			(ftyp.Kind() == reflect.Ptr && ftyp.Elem().Kind() == reflect.Struct) {
+			ret[tag] = structMap(fieldValue.Interface())
+		} else {
+			ret[tag] = fieldValue.Interface()
+		}
+	}
+	return ret
+}
+
+func transformRec(m map[string]interface{}) map[string]interface{} {
+	for k, v := range m {
+		if innerMap, ok := v.(map[string]interface{}); ok {
+			transformRec(innerMap)
+			continue
+		}
+		switch k {
+		case "type":
+			// replace numeric enum with string
+			m["type"] = v.(*pb.TraceEvent_Type).String()
+		case "timestamp":
+			// patch the timestamp to drop the microsecond and nanosecond portions.
+			m["timestamp"] = *(v.(*int64)) / int64(time.Millisecond)
+		case "peerID":
+			// parse the peer ID.
+			if id, err := peer.IDFromBytes(v.([]byte)); err == nil {
+				m["peerID"] = id.String()
+			}
+		}
+	}
+	return m
 }
