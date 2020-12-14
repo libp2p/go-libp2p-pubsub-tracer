@@ -38,6 +38,12 @@ var (
 	logger = logging.Logger("traced")
 )
 
+// sourceRange specifies which range of buf entries were reported by this remote maddr.
+type sourceRange struct {
+	start, end int // start and end are both inclusive.
+	maddr      multiaddr.Multiaddr
+}
+
 type TraceCollector struct {
 	host host.Host
 	dir  string
@@ -45,9 +51,9 @@ type TraceCollector struct {
 	json    bool
 	jsonDir string
 
-	mx        sync.Mutex
-	buf       []*pb.TraceEvent
-	bufremote multiaddr.Multiaddr // remote multiaddr of the peer whose events are in the buffer.
+	mx      sync.Mutex
+	buf     []*pb.TraceEvent
+	sources []sourceRange
 
 	notifyWriteCh chan struct{}
 	flushFileCh   chan struct{}
@@ -126,9 +132,15 @@ func (tc *TraceCollector) handleStream(s network.Stream) {
 
 		switch err = r.ReadMsg(&msg); err {
 		case nil:
+			if len(msg.Batch) == 0 {
+				continue
+			}
+
 			tc.mx.Lock()
+			start := len(tc.buf)
 			tc.buf = append(tc.buf, msg.Batch...)
-			tc.bufremote = s.Conn().RemoteMultiaddr()
+			end := len(tc.buf)
+			tc.sources = append(tc.sources, sourceRange{start: start, end: end, maddr: s.Conn().RemoteMultiaddr()})
 			tc.mx.Unlock()
 
 			select {
@@ -179,14 +191,32 @@ func (tc *TraceCollector) writeFiles(out io.WriteCloser, jsonOut io.WriteCloser)
 		// with our local buffer (trimmed to 0-length). On the next loop
 		// iteration, the same will occur, so we're effectively swapping buffers
 		// continuously.
+		//
+		// Since we expect the sources slice to be small, we don't need the same
+		// dance. We just make the sources in state slice nil.
 		tc.mx.Lock()
+		// buffer dance.
 		tmp := tc.buf
-		maddr := tc.bufremote
 		tc.buf = buf[:0]
 		buf = tmp
+		// reset sources.
+		sources := tc.sources
+		tc.sources = nil
 		tc.mx.Unlock()
 
+		var (
+			currSourceIdx int
+			currSource    = &sources[0]
+		)
 		for i, evt := range buf {
+			if i > currSource.end {
+				// finished the range for this source, move to next.
+				// no need to do any slice boundary check where because
+				// consistency is guaranteed.
+				currSourceIdx++
+				currSource = &sources[currSourceIdx]
+			}
+
 			buf[i] = nil
 
 			// write to the binary output.
@@ -207,7 +237,7 @@ func (tc *TraceCollector) writeFiles(out io.WriteCloser, jsonOut io.WriteCloser)
 			m = transformRec(m)
 
 			// enrich with the IP address from the multiaddr.
-			if ipaddr, err := manet.ToIP(maddr); err == nil {
+			if ipaddr, err := manet.ToIP(currSource.maddr); err == nil {
 				m["ip"] = ipaddr.String()
 			}
 
