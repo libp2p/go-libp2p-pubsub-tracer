@@ -78,6 +78,8 @@ func main() {
 		log.Fatal(err)
 	}
 
+	fmt.Printf("listening on: %s\n", host.Network().ListenAddresses())
+
 	tr, err := traced.NewTraceCollector(host, *dir, *jsonTrace)
 	if err != nil {
 		log.Fatal(err)
