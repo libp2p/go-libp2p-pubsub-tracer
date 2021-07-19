@@ -308,7 +308,7 @@ Outer:
 
 			finfo, err := os.Stat(current)
 			if err != nil {
-				logger.Warningf("error stating trace log file: %s", err)
+				logger.Warnf("error stating trace log file: %s", err)
 				continue Inner
 			}
 
