@@ -48,6 +48,8 @@ func NewElasticsearchTraceCollector(host host.Host, connectionString string, ind
 
 // collectToElasticsearchWorker routes collected traces to elasticsearch instance
 func (tc *TraceCollector) collectElasticsearchWorker(es *elasticsearch.Client, index string) {
+	defer close(tc.doneCh)
+
 	var buf []*pb.TraceEvent
 
 	for {
@@ -61,7 +63,7 @@ func (tc *TraceCollector) collectElasticsearchWorker(es *elasticsearch.Client, i
 			jsonEvt, err := json.Marshal(evt)
 			if err != nil {
 				buf[i] = nil
-				fmt.Printf("Failed marshaling event: %w, err")
+				fmt.Printf("Failed marshaling event: %s", err)
 			}
 
 			req := esapi.IndexRequest{
@@ -73,7 +75,7 @@ func (tc *TraceCollector) collectElasticsearchWorker(es *elasticsearch.Client, i
 			res, err := req.Do(context.Background(), es)
 			if err != nil {
 				buf[i] = nil
-				fmt.Printf("Failed sending event to elasticsearch: %w, err")
+				fmt.Printf("Failed sending event to elasticsearch: %s", err)
 				continue
 			}
 
