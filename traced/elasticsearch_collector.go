@@ -14,6 +14,9 @@ import (
 	pb "github.com/libp2p/go-libp2p-pubsub/pb"
 )
 
+// NewFileTraceCollector creates a new pubsub traces collector. A collector is a process
+// that listens on a libp2p endpoint, accepts pubsub tracing streams from peers,
+// and sends traces to elasticsearch instance
 func NewElasticsearchTraceCollector(host host.Host, connectionString string, index string) (*TraceCollector, error) {
 	conUrl, err := url.Parse(connectionString)
 
