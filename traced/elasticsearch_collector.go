@@ -3,7 +3,6 @@ package traced
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/url"
 	"strings"
 
@@ -66,7 +65,7 @@ func (tc *TraceCollector) collectElasticsearchWorker(es *elasticsearch.Client, i
 			jsonEvt, err := json.Marshal(evt)
 			if err != nil {
 				buf[i] = nil
-				fmt.Printf("Failed marshaling event: %s", err)
+				logger.Errorf("Failed marshaling event: %s", err)
 			}
 
 			req := esapi.IndexRequest{
@@ -78,7 +77,7 @@ func (tc *TraceCollector) collectElasticsearchWorker(es *elasticsearch.Client, i
 			res, err := req.Do(context.Background(), es)
 			if err != nil {
 				buf[i] = nil
-				fmt.Printf("Failed sending event to elasticsearch: %s", err)
+				logger.Errorf("Failed sending event to elasticsearch: %s", err)
 				continue
 			}
 
