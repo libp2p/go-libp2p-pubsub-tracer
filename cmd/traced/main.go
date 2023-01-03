@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/signal"
@@ -102,7 +101,7 @@ func main() {
 }
 
 func readIdentity(path string) (crypto.PrivKey, error) {
-	bytes, err := ioutil.ReadFile(path)
+	bytes, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +120,7 @@ func generateIdentity(path string) (crypto.PrivKey, error) {
 		return nil, err
 	}
 
-	err = ioutil.WriteFile(path, bytes, 0400)
+	err = os.WriteFile(path, bytes, 0400)
 
 	return priv, err
 }
