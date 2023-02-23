@@ -14,7 +14,6 @@ require (
 )
 
 require (
-	github.com/btcsuite/btcd v0.20.1-beta // indirect
 	github.com/davidlazar/go-crypto v0.0.0-20170701192655-dcfb0a7ac018 // indirect
 	github.com/flynn/noise v0.0.0-20180327030543-2492fe189ae6 // indirect
 	github.com/google/gopacket v1.1.17 // indirect
@@ -72,18 +71,22 @@ require (
 	github.com/multiformats/go-multihash v0.0.14 // indirect
 	github.com/multiformats/go-multistream v0.2.0 // indirect
 	github.com/multiformats/go-varint v0.0.6 // indirect
+	github.com/onsi/ginkgo v1.14.0 // indirect
+	github.com/onsi/gomega v1.10.1 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/spacemonkeygo/spacelog v0.0.0-20180420211403-2296661a0572 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
+	github.com/stretchr/testify v1.7.0 // indirect
 	github.com/whyrusleeping/multiaddr-filter v0.0.0-20160516205228-e903e4adabd7 // indirect
 	github.com/whyrusleeping/timecache v0.0.0-20160911033111-cfcb2f1abfee // indirect
 	go.opencensus.io v0.22.4 // indirect
 	go.uber.org/atomic v1.6.0 // indirect
 	go.uber.org/multierr v1.5.0 // indirect
 	go.uber.org/zap v1.15.0 // indirect
-	golang.org/x/crypto v0.0.0-20200423211502-4bdfaf469ed5 // indirect
-	golang.org/x/net v0.0.0-20190923162816-aa69164e4478 // indirect
+	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9 // indirect
+	golang.org/x/net v0.0.0-20200813134508-3edf25e44fcc // indirect
 	golang.org/x/sys v0.0.0-20220722155257-8c9f86f7a55f // indirect
 	golang.org/x/text v0.3.8 // indirect
+	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 )
