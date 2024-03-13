@@ -2,7 +2,6 @@ module github.com/libp2p/go-libp2p-pubsub-tracer
 
 go 1.21
 
-
 require (
 	github.com/gogo/protobuf v1.3.1
 	github.com/hashicorp/go-multierror v1.0.0
