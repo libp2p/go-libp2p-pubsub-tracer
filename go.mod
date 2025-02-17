@@ -16,7 +16,7 @@ require (
 require (
 	github.com/btcsuite/btcd v0.20.1-beta // indirect
 	github.com/davidlazar/go-crypto v0.0.0-20170701192655-dcfb0a7ac018 // indirect
-	github.com/flynn/noise v0.0.0-20180327030543-2492fe189ae6 // indirect
+	github.com/flynn/noise v1.0.0 // indirect
 	github.com/google/gopacket v1.1.17 // indirect
 	github.com/google/uuid v1.1.1 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
@@ -82,8 +82,8 @@ require (
 	go.uber.org/atomic v1.6.0 // indirect
 	go.uber.org/multierr v1.5.0 // indirect
 	go.uber.org/zap v1.15.0 // indirect
-	golang.org/x/crypto v0.0.0-20200423211502-4bdfaf469ed5 // indirect
-	golang.org/x/net v0.0.0-20190923162816-aa69164e4478 // indirect
+	golang.org/x/crypto v0.0.0-20210322153248-0c34fe9e7dc2 // indirect
+	golang.org/x/net v0.0.0-20210226172049-e18ecbb05110 // indirect
 	golang.org/x/sys v0.0.0-20220722155257-8c9f86f7a55f // indirect
 	golang.org/x/text v0.3.8 // indirect
 )
