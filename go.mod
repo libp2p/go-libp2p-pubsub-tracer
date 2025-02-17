@@ -3,6 +3,7 @@ module github.com/libp2p/go-libp2p-pubsub-tracer
 go 1.23
 
 require (
+	github.com/elastic/go-elasticsearch/v7 v7.14.0
 	github.com/gogo/protobuf v1.3.1
 	github.com/hashicorp/go-multierror v1.0.0
 	github.com/ipfs/go-log v1.0.4
