@@ -28,6 +28,8 @@ func main() {
 	id := flag.String("id", "identity", "daemon identity file")
 	dir := flag.String("dir", "traced.out", "trace log directory")
 	jsonTrace := flag.String("json", "", "json trace directory")
+	elasticsearchConnectionStr := flag.String("elasticsearch", "", "elasticsearch connection string (disables file logging if sent)")
+	elasticsearchIndex := flag.String("elasticsearch-index", "lp2p-tracer", "elasticsearch index")
 	flag.Parse()
 
 	var privkey crypto.PrivKey
@@ -77,9 +79,17 @@ func main() {
 		log.Fatal(err)
 	}
 
-	tr, err := traced.NewTraceCollector(host, *dir, *jsonTrace)
-	if err != nil {
-		log.Fatal(err)
+	var tr *traced.TraceCollector
+	if *elasticsearchConnectionStr != "" {
+		tr, err = traced.NewElasticsearchTraceCollector(host, *elasticsearchConnectionStr, *elasticsearchIndex)
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		tr, err = traced.NewFileTraceCollector(host, *dir, *jsonTrace)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	logging.SetLogLevel("traced", "DEBUG")
